@@ -2,17 +2,16 @@ from hangman import *
 from vkio import *
 from dbio import *
 
+NO_ENEMY, AWAITING, FIGHTING = 'no_enemy', 'awaiting', 'fighting'
 max_nick_size = 20
 command_list = [
-    'help', 'register', 'challenge'
+    'help', 'register', 'challenge',
+    'try', 'rating', 'surrender', 'nick'
 ]
 
 
 def text(address):
     return ''.join(open(f'messages/{address}.txt', 'r', encoding='utf-8').readlines())
-
-
-NO_ENEMY, AWAITING, FIGHTING = 1, 2, 3
 
 
 class User:
@@ -40,17 +39,11 @@ class Interface:
     def main_cycle(self):
         self.vk_tool.start()
         self.db_tool.start()
-        print('-------------------------')
         for event in self.vk_tool.long_poll.listen():
             if event.type == VkBotEventType.MESSAGE_ALLOW:
                 self.vk_tool.send_message(event.object['from_id'], text('welcome message'))
             if event.type == VkBotEventType.MESSAGE_NEW:
-                print(event.object.message['from_id'])
-                print(event.object.message['text'])
                 self.process_command(event.object.message['from_id'], event.object.message['text'])
-                print(self.users[event.object.message['from_id']].condition)
-                print(self.users[event.object.message['from_id']].enemy)
-                print('-------------------------')
 
     def process_command(self, user, message):
         command = message.split()
@@ -60,13 +53,13 @@ class Interface:
         if user not in self.users:
             self.users[user] = User()
         match command[0]:
-            case '/challenge':  # 0%
+            case '/challenge':
                 self.process_challenge(user, command)
-            case '/register':  # 100%
+            case '/register':
                 self.process_register(user, command)
-            case '/help':  # ???#
+            case '/help':
                 self.process_help(user, command)
-            case '/nick':  # 100%
+            case '/nick':
                 self.process_nick(user, command)
             case '/surrender':
                 self.process_surrender(user, command)
@@ -78,6 +71,8 @@ class Interface:
                 self.wrong_input(user)
 
     def verify_nick(self, user, nick):
+        if len(nick) > max_nick_size:
+            return -1
         for symbol in nick:
             if symbol.lower() not in allowed_symbols:
                 return -1
@@ -106,9 +101,6 @@ class Interface:
     def wrong_input(self, user):
         self.vk_tool.send_message(user, text('wrong_input'))
 
-    def selfcest_check(self, user, nick):
-        return user == self.db_tool.get(1, nick, 0)
-
     def user_exist_check(self, nick):
         return bool(self.db_tool.get(1, nick, 0))
 
@@ -119,6 +111,14 @@ class Interface:
         message += f'Ошибки: {" ".join(self.users[user].game_session.wrong)}\n'
         message += f'Осталось прав на ошибку: {self.users[user].game_session.mistakes_left}'
         return message
+
+    def correct_user_check(self, user, command):
+        if user == self.db_tool.get(1, command[2], 0):
+            self.vk_tool.send_message(user, text('no_selfcest'))
+            return True
+        if not self.user_exist_check(command[2]):
+            self.vk_tool.send_message(user, 'Такой пользователь в системе не существует')
+            return True
 
     def process_help(self, user, command):
         match len(command):
@@ -134,7 +134,7 @@ class Interface:
 
     def process_register(self, user, command):
         if self.db_tool.get(0, user, 0):
-            self.vk_tool.send_message(user, f"{text('already_registered')} {self.db_tool.get(0, user, 1)}")
+            self.vk_tool.send_message(user, f'Вы уже зарегистрированы, ваш ник: {self.db_tool.get(0, user, 1)}')
             return
         if len(command) != 2:
             self.wrong_input(user)
@@ -145,7 +145,7 @@ class Interface:
             case 0:
                 self.vk_tool.send_message(user, text('correct_nick'))
             case 1:
-                self.vk_tool.send_message(user, text('already_used_nick'))
+                self.vk_tool.send_message(user, 'Данный ник уже используется, предложите новый')
 
     def process_challenge(self, user, command):
         if len(command) < 3:
@@ -167,14 +167,10 @@ class Interface:
         if len(command) < 4:
             self.wrong_input(user)
             return
-        if self.selfcest_check(user, command[2]):
-            self.vk_tool.send_message(user, text('no_selfcest'))
-            return
-        if not self.user_exist_check(command[2]):
-            self.vk_tool.send_message(user, text('non_existent_user'))
+        if self.correct_user_check(user, command):
             return
         if self.users[user].condition != NO_ENEMY:
-            self.vk_tool.send_message(user, 'Вы уже задействованы в вызове, так что не можете бросить новый')
+            self.vk_tool.send_message(user, text('busy_no_offer'))
             return
         prey = self.db_tool.get(1, command[2], 0)
         try:
@@ -208,14 +204,10 @@ class Interface:
         if len(command) != 3:
             self.wrong_input(user)
             return
-        if self.selfcest_check(user, command[2]):
-            self.vk_tool.send_message(user, text('no_selfcest'))
-            return
-        if not self.user_exist_check(command[2]):
-            self.vk_tool.send_message(user, text('non_existent_user'))
+        if self.correct_user_check(user, command):
             return
         if self.users[user].condition != NO_ENEMY:
-            self.vk_tool.send_message(user, 'Вы уже задействованы в вызове, так что не можете принять новый')
+            self.vk_tool.send_message(user, text('busy_no_accept'))
             return
         hunter = self.db_tool.get(1, command[2], 0)
         for awaiting in self.users[user].awaiting:
@@ -232,11 +224,7 @@ class Interface:
         if len(command) != 3:
             self.wrong_input(user)
             return
-        if self.selfcest_check(user, command[2]):
-            self.vk_tool.send_message(user, text('no_selfcest'))
-            return
-        if not self.user_exist_check(command[2]):
-            self.vk_tool.send_message(user, text('non_existent_user'))
+        if self.correct_user_check(user, command):
             return
         hunter = self.db_tool.get(1, command[2], 0)
         for awaiting in self.users[user].awaiting:
@@ -252,11 +240,7 @@ class Interface:
         if len(command) != 3:
             self.wrong_input(user)
             return
-        if self.selfcest_check(user, command[2]):
-            self.vk_tool.send_message(user, text('no_selfcest'))
-            return
-        if not self.user_exist_check(command[2]):
-            self.vk_tool.send_message(user, text('non_existent_user'))
+        if self.correct_user_check(user, command):
             return
         prey = self.db_tool.get(1, command[2], 0)
         for awaiting in self.users[prey].awaiting:
@@ -271,7 +255,7 @@ class Interface:
     def process_nick(self, user, command):
         match len(command):
             case 1:
-                self.vk_tool.send_message(user, f"{text('return_nick')} {self.db_tool.get(0, user, 1)}")
+                self.vk_tool.send_message(user, f'Ваш ник: {self.db_tool.get(0, user, 1)}')
             case 2:
                 if self.db_tool.get(0, command[1], 1):
                     self.vk_tool.send_message(user, f"{text('found_by_id')} {self.db_tool.get(0, command[1], 1)}")
@@ -302,8 +286,8 @@ class Interface:
             case 1:
                 message = ''
                 rating = sorted(self.db_tool.get_everything(), key=lambda row: row[2], reverse=True)
-                for row in rating:
-                    message += f'{row[1]}: {row[2]}\n'
+                for number, row in enumerate(rating, start=1):
+                    message += f'{number}) {row[1]} : {row[2]}\n'
                 self.vk_tool.send_message(user, message)
             case 2:
                 message = ''
@@ -312,9 +296,10 @@ class Interface:
                 except ValueError:
                     self.wrong_input(user)
                     return
-                rating = sorted(self.db_tool.get_everything(), key=lambda row: row[2], reverse=True)[:limit]
-                for row in rating:
-                    message += f'{row[1]}: {row[2]}\n'
+                rating = sorted(self.db_tool.get_everything(), key=lambda row: row[2], reverse=True)
+                for number, row in enumerate(rating, start=1):
+                    if number <= limit or row[0] == user:
+                        message += f'{number}) {row[1]} : {row[2]}\n'
                 self.vk_tool.send_message(user, message)
             case _:
                 self.wrong_input(user)
