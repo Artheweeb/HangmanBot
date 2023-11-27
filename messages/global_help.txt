@@ -2,4 +2,8 @@
 Список команд:
 /challenge
 /help
+/nick
+/rating
 /register
+/try
+/surrender
