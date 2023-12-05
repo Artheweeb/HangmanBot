@@ -1,6 +1,6 @@
-from hangman import *
-from vkio import *
-from dbio import *
+from hangman import HangmanSession, allowed_symbols
+from vkio import VKInputOutputClass, VkBotEventType
+from dbio import DBInputOutputClass
 
 NO_ENEMY, AWAITING, FIGHTING = 'no_enemy', 'awaiting', 'fighting'
 max_nick_size = 20
